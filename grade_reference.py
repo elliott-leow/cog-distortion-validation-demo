@@ -1182,7 +1182,13 @@ def make_grade_figures(res: dict, layers: List[int], target_layer: int) -> None:
     plt.close(fig)
 
 
-def parse_args():
+def parse_args(argv: List[str] = None):
+    """Parse CLI arguments. If `argv` is None, uses sys.argv (CLI path);
+    if a list is supplied, parses that (notebook path). This lets callers
+    in the Colab notebook build a `Namespace` from the same source of
+    truth as the CLI — so adding a new argparse flag does not silently
+    break the notebook with AttributeError.
+    """
     ap = argparse.ArgumentParser()
     ap.add_argument("--model", choices=list(MODEL_IDS), default="1b")
     ap.add_argument("--device", default=None)
@@ -1196,7 +1202,7 @@ def parse_args():
                     help="number of layers to sample; 0=all")
     ap.add_argument("--alpha", type=float, default=4.0)
     ap.add_argument("--quick", action="store_true")
-    args = ap.parse_args()
+    args = ap.parse_args(argv)
     if args.quick:
         args.n_per_cat = 1
         args.n_intervene = 6
