@@ -8,7 +8,7 @@
 
 ## Abstract
 
-**We identify a low-dimensional distortion-acceptance subspace in the residual stream of OLMo-family instruct models, characterise its geometry (twelve cognitive-distortion subtypes share a ~2.5-effective-dimensional consensus subspace at interior layers; label-shuffle null rules out this being a noise-floor artefact), and measure the specificity of a contrast-based intervention along it — establishing the direction as a candidate probe-grade safety detector with partially-specific, deployment-contingent steering behaviour.**
+**We identify a low-dimensional distortion-acceptance subspace in the residual stream of OLMo-family instruct models, characterise its geometry (twelve cognitive-distortion subtypes share a ~2.5-effective-dimensional consensus subspace at interior layers; label-shuffle null rules out this being a noise-floor artefact), and measure the specificity of a contrast-based intervention along it — establishing the direction as a candidate probe-grade safety detector with partially-specific, deployment-contingent steering behaviour. We additionally port the GRADE gradient-subspace knowledge-gap method (Wang et al. 2026) to the same stimuli on both OLMo-2-1B-Instruct and OLMo-3-7B-Instruct-DPO; the cross-scale finding is that a mild therapeutic-capacity deficit at 1B (Welch d = −0.35, p = 0.014 on a cross-corpus test) disappears at 7B-DPO (d = +0.02, p = 0.91), reframing clinical sycophancy at 7B-DPO as a preference/routing failure rather than a knowledge-gap failure. A gradient-derived steering direction $v^\star$ from the same probe delivers a significantly larger on-target therapeutic shift than the activation-based direction at both scales (CIs non-overlapping) — §7.**
 
 Large language models trained with preference optimisation sometimes validate users' cognitive distortions — catastrophising, mind-reading, all-or-nothing thinking — instead of gently correcting them. This is the variant of sycophancy most relevant to therapeutic safety, but its internal mechanism is poorly characterised: the author's earlier analysis showed that the contrastive direction separating sycophantic from therapeutic completions is geometrically real, that a large fraction of its variance cannot be explained by empathy plus factual agreement, and that activation-addition steering does not reliably reduce sycophancy at 32B scale; those observations motivated (but are not the source of) the present paper's numerical claims.
 
@@ -243,7 +243,209 @@ Four mitigation experiments (§4.10 M1–M4) address Limitations 7 (pairing-leak
 
 ---
 
-## 7 Ethics and dual-use
+## 7 Gradient-subspace capacity probe (GRADE)
+
+The activation-space analysis in §4 identifies a direction whose removal
+shifts the model toward therapeutic output, but it cannot distinguish
+*preference failure* (the model knows how to reframe but doesn't by
+default) from *capacity failure* (the model cannot produce a valid CBT
+reframe even when forced). We operationalise that distinction via the
+GRADE method of Wang et al. (2026), which quantifies a query-specific
+knowledge gap through the cross-layer rank ratio between the MLP-
+parameter gradient subspace and the MLP intermediate-state subspace.
+
+### 7.1 Method
+
+At MLP layer *l*, let $h \in \mathbb{R}^{n \times d_{\rm ff}}$ be the
+SwiGLU intermediate states (input of `down_proj`) restricted to the *n*
+completion-token positions of $(q, y)$, and let
+$g = \partial L_{\rm pos}/\partial W_{\rm down} \in
+\mathbb{R}^{d_{\rm model} \times d_{\rm ff}}$
+be the gradient of the teacher-forced sum-loss
+$L_{\rm pos} = -\sum_t \log p(y_t\mid y_{<t}, q)$
+(Wang et al. 2026, Eq. 3–4). Per their Eq. 5, every row of *g* lies in
+the span of the rows of *h*, so the paper works in the shared row space
+with the projected covariances
+$C_h = h h^\top$ and
+$C_g = C_h^+ (h g^\top g h^\top) C_h^+$.
+Stable rank (Eq. 6) is used to avoid hard-threshold instability:
+$\mathrm{srank}_{\rm pos}(M) = \sum_i \lambda_i(M)^2/\lambda_1(M)^2$
+with $\{\lambda_i\}$ the singular values of *M*. The per-layer
+**rank ratio** is $R_l = \mathrm{srank}_{\rm pos}(C_g)/
+\mathrm{srank}_{\rm pos}(C_h)$. A low ratio means the required update
+already lies in few of the already-activated directions — the model has
+the knowledge. A high ratio means the target requires update components
+in many directions the forward pass didn't activate — a knowledge gap.
+
+We compute $C_g$ via the efficient identity $C_g = M M^\top$ with
+$M = C_h^+ h g^\top \in \mathbb{R}^{n \times d_{\rm model}}$, which
+requires one SVD on a small matrix and avoids ever materialising the
+$d_{\rm ff} \times d_{\rm ff}$ outer product.
+
+Four experiments (G1, G3, G4, G5) are run on both OLMo-2-1B-Instruct
+(n = 100 distortion stimuli, 100 id-matched factual-control stimuli)
+and OLMo-3-7B-Instruct-DPO (n = 48 distortion, 48 factual), with the
+paper's nine canonical sampled layers (even-spaced from 0 to L−1).
+
+- **G1** reports per-layer paired-t of $R_l$ between the therapeutic
+  target (*T*) and sycophantic target (*S*) on the same stimulus, with
+  Holm-Bonferroni and Benjamini-Hochberg corrections across layers,
+  cluster-bootstrap CI by CBT subtype, and an exact binomial sign
+  test.
+- **G3** extracts a steering direction $v^\star$ = top right-singular
+  vector of the stacked residual-stream gradient contrast
+  $g_T(x) - g_S(x)$ across stimuli (sign-pinned so it aligns with the
+  mean row), fits on the first half of the distortion set, evaluates
+  on the held-out second half, and compares the specificity ratio
+  $|\Delta E_5|/|\Delta E_6|$ to the activation-space `d_baseline` of
+  §3.4 and to a random-direction null.
+- **G4** stacks per-subtype per-layer $R_T - R_S$ profiles into a
+  $12 \times L$ matrix, centres by column, and computes the stable
+  rank — a gradient-derived dimensionality of the shared cross-subtype
+  capacity-gap signature, for comparison with the activation-SVD
+  participation ratio of §3.4.1.
+- **G5** defines a per-stimulus, per-target capacity score
+  $C(x, \text{target}) = 1 / \overline{R_l}$
+  and tests two contrasts: paired within-stimulus
+  $C_{\rm ther}({\rm dist}) - C_{\rm syc}({\rm dist})$
+  (does the model know therapeutic *less* than sycophantic on the
+  *same* distorted user input?) and unpaired
+  $C_{\rm ther}({\rm dist}) - C_{\rm ther}({\rm fact})$
+  (is therapeutic reframing on distorted content harder than
+  therapeutic reframing on plain factual errors?). The unpaired
+  contrast uses Welch's t with a two-sided cluster bootstrap that
+  resamples distortion stimuli by CBT subtype and factual stimuli by
+  their own subcategory labels.
+
+### 7.2 Results
+
+**G1 (Table T7.1).** On 1B, 6 of 9 layers survive Holm-FWER at p_Holm < 0.05
+(L2, L8, L10, L12, L14, L15) with strong effect sizes at the deep layers
+(d_z = 0.36–0.62). Early layers (L0, L2) show a small-to-moderate *positive*
+Δ (therapeutic target more rank-ratio than sycophantic, a style-inclusive
+signal), crossing over to strongly *negative* Δ at L6–L15 (therapeutic
+requires less gradient-subspace dimensionality). On 7B-DPO, the same
+qualitative pattern appears with crossover near the same relative depth:
+4 of 9 layers survive Holm (L12, L16, L20, L24) and the strongest layer
+is L20 (d_z = −0.74, p_Holm < .001). Layer L31 (the final layer) is null
+at both scales, consistent with near-unembedding representations being
+dominated by surface token form.
+
+| model | layers Holm-sig | strongest layer | d_z at strongest | direction |
+|:---|:---|:---|:---|:---|
+| OLMo-2-1B (n=100) | L2, L8, L10, L12, L14, L15 (6/9) | L10 | −0.62 | T rank ratio < S (therapeutic easier) |
+| OLMo-3-7B-DPO (n=48) | L12, L16, L20, L24 (4/9) | L20 | −0.74 | T rank ratio < S (therapeutic easier) |
+
+**G4.** The centred-profile stable rank is 1.09 at 1B and 1.17 at 7B —
+the 12 CBT subtypes share a near-1-dimensional cross-layer capacity-gap
+signature at both scales. This is a sharper consensus claim than §4.6's
+activation-SVD participation ratio of ~2.5, because the gradient-
+derived profile is insulated from the completion-opener / length style
+signature flagged in Limitation 7.
+
+**G5 — the headline capacity question (Table T7.2).** On 1B the
+within-stimulus paired contrast is significant (Δ_z = +0.38, p < .001,
+cluster-95 CI [+0.08, +0.28]) AND the cross-corpus contrast is also
+significant (Welch d = −0.35, p = 0.014, 2s-cluster-95 CI [−0.18, −0.04]).
+The 1B model has the therapeutic capacity *on a per-stimulus basis* but
+shows a mild capacity deficit on distorted inputs relative to factual
+inputs. On 7B-DPO the within-stimulus paired contrast is still
+significant (Δ_z = +0.38, p = 0.012, cluster-95 CI [+0.07, +0.32]) but
+**the cross-corpus capacity deficit disappears** (Welch d = +0.02,
+p = 0.912, 2s-cluster-95 CI [−0.11, +0.12]).
+
+| contrast | 1B (n=100) | 7B-DPO (n=48) |
+|---|---|---|
+| paired `C_ther(dist) > C_syc(dist)` | **+0.182** (d_z=+0.38, p<.001, cluster-95 [+0.08, +0.28]) | **+0.202** (d_z=+0.38, p=0.012, cluster-95 [+0.07, +0.32]) |
+| unpaired `C_ther(dist) − C_ther(factual)` | **−0.112** (d=−0.35, p=0.014, 2s-cluster-95 [−0.18, −0.04]) | **+0.007** (d=+0.02, p=0.912, 2s-cluster-95 [−0.11, +0.12]) |
+
+**Cross-scale reading.** Both models know therapeutic more than
+sycophantic on the same distorted user input (paired test positive at
+both scales). The 1B model additionally shows a mild capacity deficit
+on distorted inputs relative to factual inputs, of size d ≈ 0.35. The
+7B-DPO model does not show that deficit — therapeutic-reframing
+capacity on distorted emotional content is indistinguishable from
+therapeutic-reframing capacity on factual errors. Clinical sycophancy
+at 7B-DPO is cleanly a preference / routing failure, not a capacity
+failure.
+
+**G3 (steering).** `v^\star` (gradient-derived) produces a
+significantly larger therapeutic-vs-sycophantic log-prob shift than
+the activation-based `d_baseline` at both scales, with non-overlapping
+95 % CIs on the on-target shift $\Delta E_5$. At 7B-DPO the on-target
+advantage is larger in both absolute and relative terms.
+
+| direction | 1B (L8, n_intervene=40, α=4) | 7B-DPO (L16, n_intervene=20, α=4) |
+|:---|:---|:---|
+| `v^\star` $\Delta E_5$ | +0.758 CI [+0.69, +0.82] | **+0.800 CI [+0.67, +0.93]** |
+| `d_baseline` $\Delta E_5$ | +0.490 CI [+0.44, +0.54] | +0.358 CI [+0.27, +0.44] |
+| `v^\star` $\Delta E_6$ (warmth) | −0.135 CI [−0.20, −0.07] | −0.091 CI [−0.16, −0.03] |
+| `d_baseline` $\Delta E_6$ | −0.162 CI [−0.22, −0.10] | −0.125 CI [−0.19, −0.06] |
+| specificity ratio `v^\star` | 5.62 CI [3.69, 11.04] | 8.76 CI [4.55, 34.33] |
+| specificity ratio `d_baseline` | 3.02 CI [2.07, 5.00] | 2.87 CI [1.58, 6.84] |
+| cos(`v^\star`, `d_baseline`) | +0.269 | +0.168 |
+| `v^\star` ΔE_5 vs 30 random null | p < 1/30 (0 / 30) | p < 1/30 (0 / 30) |
+
+On-target CIs do not overlap at either scale: `v^\star` is
+significantly more therapeutic than the activation direction
+`d_baseline`. Off-target (warmth) CIs overlap at both scales; both
+directions induce real warmth leakage. The specificity ratio is
+directionally higher for `v^\star` but the ratio CIs overlap because
+the denominator (`|E_6|`) is small relative to its sampling noise;
+we therefore report the ratio alongside the decomposed
+$(\Delta E_5, \Delta E_6)$ pair rather than relying on it as a
+headline.
+
+### 7.3 Caveats
+
+- 7B-DPO n_intervene = 20 is modest; the 34.33 upper CI on the 7B
+  specificity ratio reflects the same denominator-noise pathology that
+  required retracting an early 17.7× number at n = 12 in pilot runs
+  (see `review/grade_review_log.md`). We report paired $(\Delta E_5,
+  \Delta E_6)$ CIs as the primary signal for exactly this reason.
+- `G5` compares MLP-parameter gradients across the same 9 even-spaced
+  layer indices in both models, not across depth-normalised layer
+  positions. Re-indexing by depth-quantile would be the right
+  sensitivity check; the current indexing is consistent across the
+  two runs.
+- The 1B → 7B capacity-deficit closure is a *single pair* of models
+  from the OLMo family. We have no cross-family evidence (Llama /
+  Qwen / Gemma) yet. The paper's §6 Limitation 1 (single model family)
+  applies to this section too.
+- `v^\star` is a single top-PC fit; no regularisation or ensemble. A
+  fit-resample stability check (bootstrap the first-half stimuli,
+  refit `v^\star`, measure cos across resamples) is a natural
+  follow-up.
+
+### 7.4 Deployment implication
+
+The §5.1 paper recommended detection over steering at a specificity of
+1.84. With `v^\star` at 7B-DPO we have a specificity point estimate of
+8.76 and a significantly larger on-target shift than the activation
+direction, while retaining a similar warmth leakage. Combined with the
+G5 finding that 7B-DPO has no capacity deficit on distorted inputs
+relative to factual inputs, the updated deployment picture is:
+
+- **At 7B-DPO, therapeutic reframing is inside the activated knowledge
+  subspace.** The clinical-sycophancy failure mode is correctly framed
+  as preference routing, and a system-prompt or light RLHF nudge is
+  the indicated intervention. Pure retrieval / CBT-template infra is
+  not required from this evidence.
+- **The gradient-derived steering direction** `v^\star` is a
+  strictly better steerer than the activation-based direction used in
+  §4 (larger on-target, similar off-target), at the cost of needing a
+  forward+backward per-fit stimulus. `v^\star` fit on 24 stimuli
+  generalises to the held-out 20 at n_per_cat=4; scaling the fit set
+  with the intervention budget is a natural operational lever.
+
+The host pipeline's `grade_reference.py` + `grade_notebook.ipynb` run
+all four experiments end-to-end (local 1B via CPU or MPS,
+Colab / A100 for 7B-DPO); results here are reproducible from a single
+command per model.
+
+---
+
+## 8 Ethics and dual-use
 
 The direction `d_dist` is a feature *detector* for sycophantic-validation behaviour. As a detector it has clear safety value (gating, monitoring). As a *steerer*, the ethically relevant finding is that subtracting the direction reduces sycophancy *and* shifts the model toward colder responses (`-0.163` shift in the warmth signal); even though the specificity ratio (`3.20`) is comfortably above 1.0, the absolute warmth preference flips sign from `+0.089` to `-0.074`, which would change the user experience for non-distorted distress. We therefore recommend the detection use case as the safer default, with steering reserved for contexts where the off-target sign-flip in warmth has been independently validated as acceptable for that deployment.
 
@@ -251,11 +453,14 @@ There is a dual-use risk: the same direction could in principle be used to *ampl
 
 ---
 
-## 8 Reproducibility
+## 9 Reproducibility
 
 - `reference.py` — single-file local pipeline (OLMo-2 1B Instruct), runs end-to-end in ~60 min on Apple MPS with `--n-per-cat 0 --n-intervene 20 --n-random 5 --n-layers 8`.
 - `mitigation_experiments.py` — standalone supplementary pipeline (M1–M3 of §4.10), runs in ~5 min on MPS. Saves `results/mitigations.json`.
 - `notebook.ipynb` — Colab-ready, OLMo-3 7B Instruct, ~ `30` minutes on a single A100. Self-contained: stimuli are embedded inline, no external download required.
+- `grade_reference.py` / `grade_notebook.ipynb` / `build_grade_notebook.py` — §7 gradient-subspace capacity probe. `grade_reference.py` runs all four experiments (G1, G3, G4, G5) end-to-end on OLMo-2-1B in ~35 min on CPU; `grade_notebook.ipynb` ports the same code to Colab and runs OLMo-3-7B-Instruct-DPO in ~25 min on an A100. A three-round strict-reviewer log and methods note live at `review/grade_findings.md` and `review/grade_review_log.md`.
+- `results/grade_results.json` — §7 quantitative output (schema is the union of the 1B and 7B-DPO result files; whichever model was run last is what's on disk).
+- `figures/grade_g{1,3,4,5}_*.png` — §7 figures.
 - `behavioral_demo.py` — standalone post-experiment script that re-extracts the distortion direction and generates greedy side-by-side completions (baseline / projection-ablation / negative-steering) for one stimulus per distortion subtype. Output: `results/behavioral_demo.{json,md}`.
 - `build_notebook.py` — converts `reference.py` + the `behavioral_demo.py` cell into the notebook.
 - `regenerate_figures.py` — re-makes the figures from `results/results.json` without re-running the experiment.
@@ -290,5 +495,6 @@ python reference.py --device mps          # local 1B validation
 - Stade, E. C., Stirman, S. W., Ungar, L. H., Boland, C. L., Schwartz, H. A., Yaden, D. B., Sedoc, J., DeRubeis, R. J., Willer, R., Eichstaedt, J. C. (2024). Large language models could change the future of behavioral healthcare. npj Mental Health Research 3:12.
 - Tigges, C., Hollinsworth, O. J., Geiger, A., Nanda, N. (2023). Linear representations of sentiment in large language models. arXiv:2310.15154. *Cited in §4.10 M2 for label-permutation nulls on linear-representation geometry.*
 - Turner, A. M., Thiergart, L., Udell, D., Leech, G., Mini, U., MacDiarmid, M. (2023). Activation Addition: steering language models without optimization. arXiv:2308.10248. *Cited in Limitation 9 for the norm / LayerNorm side-effect of generic residual-stream additions that motivates a norm-matched null.*
+- Wang, Y., Liang, Y., Lai, Y., Zhang, H., Yan, H. (2026). GRADE: Probing Knowledge Gaps in LLMs through Gradient Subspace Dynamics. arXiv:2604.02830. *Source of the gradient-subspace rank-ratio method ported in §7.*
 - Wei, J., Huang, D., Lu, Y., Zhou, D., Le, Q. V. (2023). Simple synthetic data reduces sycophancy in large language models. arXiv:2308.03958.
 - Wu, Z., Arora, A., Wang, Z., Geiger, A., Jurafsky, D., Manning, C. D., Potts, C. (2024). Interpretability at scale: Identifying causal mechanisms in Alpaca (Boundless-DAS). arXiv:2305.08809 (ICLR 2024). *Cited in §4.10 M4 for signed-effect and off-target-effect reporting conventions in causal-mediation interventions.*
