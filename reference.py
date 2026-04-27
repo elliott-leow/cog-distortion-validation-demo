@@ -214,12 +214,18 @@ def _completion_acts(
     full_ids = tokenizer.encode(formatted + completion, return_tensors="pt")
     prompt_len = prompt_ids.shape[1]
     # Prefix invariant: the prompt-only encoding must be a strict prefix of
-    # the prompt+completion encoding. If a tokenizer ever retokenizes across
-    # the boundary, prompt_len-based slicing would silently corrupt every
-    # downstream activation and log-prob.
-    assert prompt_len <= full_ids.shape[1] and (
+    # the prompt+completion encoding. Base models (no chat template) can
+    # retokenise at the boundary because there is no separator; in that
+    # case we fall back to separately-tokenised IDs so prompt_len stays
+    # aligned with the completion span.
+    boundary_clean = prompt_len <= full_ids.shape[1] and (
         full_ids[0, :prompt_len].tolist() == prompt_ids[0].tolist()
-    ), "tokenizer is retokenizing across the prompt/completion boundary"
+    )
+    if not boundary_clean:
+        comp_ids = tokenizer.encode(
+            completion, return_tensors="pt", add_special_tokens=False,
+        )
+        full_ids = torch.cat([prompt_ids, comp_ids], dim=1)
 
     hidden = _hidden_states(model, full_ids, layers)
     pooled: Dict[int, torch.Tensor] = {}
@@ -448,9 +454,14 @@ def completion_logprob(
     prompt_ids = tokenizer.encode(formatted, return_tensors="pt")
     full_ids = tokenizer.encode(formatted + completion, return_tensors="pt")
     prompt_len = prompt_ids.shape[1]
-    assert prompt_len <= full_ids.shape[1] and (
+    boundary_clean = prompt_len <= full_ids.shape[1] and (
         full_ids[0, :prompt_len].tolist() == prompt_ids[0].tolist()
-    ), "tokenizer is retokenizing across the prompt/completion boundary"
+    )
+    if not boundary_clean:
+        comp_ids = tokenizer.encode(
+            completion, return_tensors="pt", add_special_tokens=False,
+        )
+        full_ids = torch.cat([prompt_ids, comp_ids], dim=1)
     if n_completion_tokens is not None:
         full_ids = full_ids[:, : prompt_len + n_completion_tokens]
     full_ids = full_ids.to(get_device(model))

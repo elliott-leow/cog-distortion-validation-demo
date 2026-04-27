@@ -47,6 +47,7 @@ builders is edited.
 
 from __future__ import annotations
 
+import argparse
 import json
 import re
 from pathlib import Path
@@ -55,7 +56,57 @@ ROOT = Path(__file__).parent
 REF = ROOT / "reference.py"
 GRADE = ROOT / "grade_reference.py"
 STIM_DIR = ROOT / "stimuli"
-OUT = ROOT / "grade_progression_clinical_safety_7b.ipynb"
+
+
+FAMILIES = {
+    # 1B family for fast end-to-end pipeline validation (works on Colab T4
+    # free tier; full sweep runs in ~10-15 min).
+    "1b": {
+        "label": "OLMo-2 1B",
+        "title": "GRADE × OLMo-2 1B Post-Training Progression — Clinical-Safety Mech-Interp",
+        "runtime_blurb": (
+            "**Runtime.** ~10-15 min on a Colab T4 (or any single GPU). "
+            "Memory peak ~6 GB per checkpoint; only one model is resident "
+            "at a time. Intended as a quick pipeline-validation pass before "
+            "the 7B sweep."
+        ),
+        "pip": "%pip install -q \"transformers>=4.45.0\" accelerate\n",
+        "variants": [
+            ("1b-base", "allenai/OLMo-2-0425-1B"),
+            ("1b-sft",  "allenai/OLMo-2-0425-1B-SFT"),
+            ("1b-dpo",  "allenai/OLMo-2-0425-1B-DPO"),
+        ],
+        "register_blurb": (
+            "## 4. Register all three OLMo-2 1B checkpoints\n\n"
+            "Upstream `grade_reference.py` only adds `7b-dpo`. We extend "
+            "MODEL_IDS in-notebook with the three 1B keys so argparse "
+            "accepts them without editing the source module."
+        ),
+        "gpu_type": "T4",
+    },
+    "7b": {
+        "label": "OLMo-3 7B",
+        "title": "GRADE × OLMo-3 7B Post-Training Progression — Clinical-Safety Mech-Interp",
+        "runtime_blurb": (
+            "**Runtime.** ~90-120 min on a single A100 40GB (three 7B "
+            "forward+backward passes plus generation). Memory peak ~22 GB "
+            "per checkpoint; only one model is resident at a time."
+        ),
+        "pip": "# OLMo-3 needs transformers >= 4.57.\n%pip install -q \"transformers>=4.57.0\" accelerate\n",
+        "variants": [
+            ("7b-base", "allenai/Olmo-3-1025-7B"),
+            ("7b-sft",  "allenai/Olmo-3-7B-Instruct-SFT"),
+            ("7b-dpo",  "allenai/Olmo-3-7B-Instruct-DPO"),
+        ],
+        "register_blurb": (
+            "## 4. Register all three OLMo-3 7B checkpoints\n\n"
+            "Upstream `grade_reference.py` only adds `7b-dpo`. We extend "
+            "MODEL_IDS in-notebook so argparse accepts the other two "
+            "without editing the source module."
+        ),
+        "gpu_type": "A100",
+    },
+}
 
 
 def md(text: str):
@@ -98,43 +149,37 @@ def load_grade() -> str:
     return src
 
 
-def build():
+def build(family: str = "7b"):
+    cfg = FAMILIES[family]
     cells = []
 
-    cells.append(md("""# GRADE × OLMo-3 7B Post-Training Progression — Clinical-Safety Mech-Interp
-
-**Goal.** Make smaller open LLMs safer for clinical use. This notebook
-sweeps the full OLMo-3 7B post-training progression (**base → SFT → DPO**)
-through the four GRADE-derived experiments (G1, G3, G4, G5) **and** three
-new analyses targeted at the clinical-sycophancy question:
-
-| New | Question it answers |
-|---|---|
-| **#1 cross-checkpoint subspace rotation** | Does post-training *amplify* a pretraining sycophancy axis or *carve* a new one? |
-| **#3 capacity × behaviour dissociation** | Are there stimuli where the model is *able* to reframe but *won't*? (the clinical-safety alarm regime) |
-| **#4 rank-1 weight edit on DPO** | Can a single rank-1 perturbation flip behaviour back toward therapeutic? |
-
-All open-ended completions (natural × 3 checkpoints, plus weight-edited
-DPO × several λ) are written to `results/to_be_judged.json` for an
-external LLM judge to score later. The post-judge cell at the end consumes
-the judged file and produces the #3 dissociation analysis without
-requiring another GPU run.
-
-**Runtime.** ~90–120 min on a single A100 40GB (three 7B forward+backward
-passes plus generation). Memory peak ~22 GB per checkpoint; only one
-model is resident at a time.
-
-**Based on.** Wang et al. (2026), *GRADE: Probing Knowledge Gaps in LLMs
-through Gradient Subspace Dynamics*, arXiv:2604.02830."""))
+    cells.append(md(
+        f"# {cfg['title']}\n\n"
+        "**Goal.** Make smaller open LLMs safer for clinical use. This notebook\n"
+        f"sweeps the full {cfg['label']} post-training progression "
+        "(**base → SFT → DPO**)\n"
+        "through the four GRADE-derived experiments (G1, G3, G4, G5) **and** three\n"
+        "new analyses targeted at the clinical-sycophancy question:\n\n"
+        "| New | Question it answers |\n"
+        "|---|---|\n"
+        "| **#1 cross-checkpoint subspace rotation** | Does post-training *amplify* a pretraining sycophancy axis or *carve* a new one? |\n"
+        "| **#3 capacity × behaviour dissociation** | Are there stimuli where the model is *able* to reframe but *won't*? (the clinical-safety alarm regime) |\n"
+        "| **#4 rank-1 weight edit on DPO** | Can a single rank-1 perturbation flip behaviour back toward therapeutic? |\n\n"
+        "All open-ended completions (natural × 3 checkpoints, plus weight-edited\n"
+        "DPO × several λ) are written to `results/to_be_judged.json` for an\n"
+        "external LLM judge to score later. The post-judge cell at the end consumes\n"
+        "the judged file and produces the #3 dissociation analysis without\n"
+        "requiring another GPU run.\n\n"
+        f"{cfg['runtime_blurb']}\n\n"
+        "**Based on.** Wang et al. (2026), *GRADE: Probing Knowledge Gaps in LLMs\n"
+        "through Gradient Subspace Dynamics*, arXiv:2604.02830."
+    ))
 
     cells.append(md("## 1. GPU & dependencies"))
     cells.append(code(
         "!nvidia-smi --query-gpu=name,memory.total --format=csv 2>/dev/null || echo 'no gpu'\n"
     ))
-    cells.append(code(
-        "# OLMo-3 needs transformers >= 4.57.\n"
-        '%pip install -q "transformers>=4.57.0" accelerate\n'
-    ))
+    cells.append(code(cfg["pip"]))
 
     cells.append(md(
         "## 2. Fetch stimuli from GitHub\n\n"
@@ -184,17 +229,12 @@ through Gradient Subspace Dynamics*, arXiv:2604.02830."""))
     cells.append(code(load_reference()))
     cells.append(code(load_grade()))
 
-    cells.append(md(
-        "## 4. Register all three OLMo-3 7B checkpoints\n\n"
-        "Upstream `grade_reference.py` only adds `7b-dpo`. We extend "
-        "MODEL_IDS in-notebook so argparse accepts the other two without "
-        "editing the source module."))
+    cells.append(md(cfg["register_blurb"]))
+    variants_lines = "".join(
+        f"    ({k!r}, {v!r}),\n" for k, v in cfg["variants"]
+    )
     cells.append(code(
-        "VARIANTS = [\n"
-        "    ('7b-base', 'allenai/Olmo-3-7B'),\n"
-        "    ('7b-sft',  'allenai/Olmo-3-7B-Instruct-SFT'),\n"
-        "    ('7b-dpo',  'allenai/Olmo-3-7B-Instruct-DPO'),\n"
-        "]\n"
+        f"VARIANTS = [\n{variants_lines}]\n"
         "for k, v in VARIANTS:\n"
         "    MODEL_IDS[k] = v\n"
         "print('MODEL_IDS:', MODEL_IDS)\n"
@@ -773,14 +813,19 @@ through Gradient Subspace Dynamics*, arXiv:2604.02830."""))
                            "language": "python"},
             "language_info": {"name": "python", "version": "3.11"},
             "accelerator": "GPU",
-            "colab": {"provenance": [], "gpuType": "A100"},
+            "colab": {"provenance": [], "gpuType": cfg["gpu_type"]},
         },
         "nbformat": 4, "nbformat_minor": 5,
     }
-    OUT.write_text(json.dumps(nb, indent=1))
-    size = OUT.stat().st_size / 1024
-    print(f"wrote {OUT} ({size:.1f} KB, {len(cells)} cells)")
+    out_path = ROOT / f"grade_progression_clinical_safety_{family}.ipynb"
+    out_path.write_text(json.dumps(nb, indent=1))
+    size = out_path.stat().st_size / 1024
+    print(f"wrote {out_path} ({size:.1f} KB, {len(cells)} cells)")
 
 
 if __name__ == "__main__":
-    build()
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--family", choices=list(FAMILIES), default="7b",
+                    help="model family to build (default: 7b)")
+    args = ap.parse_args()
+    build(args.family)

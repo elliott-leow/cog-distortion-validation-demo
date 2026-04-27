@@ -240,9 +240,20 @@ def extract_mlp_grad_data(
     prompt_ids = tokenizer.encode(formatted, return_tensors="pt")
     full_ids = tokenizer.encode(formatted + completion, return_tensors="pt")
     prompt_len = prompt_ids.shape[1]
-    assert prompt_len <= full_ids.shape[1] and (
+    boundary_clean = prompt_len <= full_ids.shape[1] and (
         full_ids[0, :prompt_len].tolist() == prompt_ids[0].tolist()
-    ), "tokenizer retokenising across boundary"
+    )
+    if not boundary_clean:
+        # Base models (no chat template) can retokenise across the
+        # prompt/completion boundary because there is no separator. Fall
+        # back to separately-tokenised IDs so prompt_len stays aligned with
+        # the actual completion span. The model still runs on a coherent
+        # contiguous sequence; only the boundary token's BPE merge differs
+        # from the joined-string version.
+        comp_ids = tokenizer.encode(
+            completion, return_tensors="pt", add_special_tokens=False,
+        )
+        full_ids = torch.cat([prompt_ids, comp_ids], dim=1)
     n_comp = int(full_ids.shape[1] - prompt_len)
     full_ids = full_ids.to(device)
 
