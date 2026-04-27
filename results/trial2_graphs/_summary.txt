@@ -1,0 +1,18 @@
+Trial 2 — allenai/Olmo-3-7B-Instruct — summary
+
+E1 (layer 16): probe AUC = 1.00 vs null mean 0.50 ± 0.055, p = 0.000
+E3 (layer 14): Cohen's d = 7.17, AUC = 1.00
+
+E2 disentanglement at layer 14:
+  unique VE warmth = 0.016
+  unique VE factual = 0.202   (~12× warmth)
+  residual VE     = 0.781
+
+E5/E6 headline (layer 16, negative_steering, α=4.0):
+  E5 therapeutic shift = +0.298 ± 0.027  (z = 11.5 vs random)
+  E6 warmth collateral = -0.135 ± 0.023  (z = -3.2 vs random)
+  specificity ratio = 2.21  95% CI [1.47, 3.62]
+
+Best meaningful specificity: L10 ablation, E5=0.153, E6=0.004, ratio=35.2
+
+Geometry at L14: PC1 = 65.7%, PR = 2.25 / 12 subtypes

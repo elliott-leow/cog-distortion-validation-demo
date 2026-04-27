@@ -136,26 +136,39 @@ through Gradient Subspace Dynamics*, arXiv:2604.02830."""))
         '%pip install -q "transformers>=4.57.0" accelerate\n'
     ))
 
-    cells.append(md("## 2. Embed stimuli"))
+    cells.append(md(
+        "## 2. Fetch stimuli from GitHub\n\n"
+        "Stimuli live in the public repo and are downloaded at runtime "
+        "(keeps the notebook small enough to load in Colab without lag). "
+        "Change `STIM_REPO`/`STIM_REF` below if you forked the repo or want "
+        "to pin a specific commit."))
     cells.append(code(
-        "import os, json\n"
-        "os.makedirs('stimuli', exist_ok=True)\n"
-        "os.makedirs('results', exist_ok=True)\n"
-        "os.makedirs('figures', exist_ok=True)\n"
-        "os.makedirs('review', exist_ok=True)\n"
-    ))
-    for fname in ["cognitive_distortions.json"]:
-        body = (STIM_DIR / fname).read_text()
-        compact = json.dumps(json.loads(body))
-        cells.append(code(
-            f"# {fname}\n"
-            f"open('stimuli/{fname}','w').write({compact!r})\n"
-        ))
-    fact_full = json.loads((STIM_DIR / "v2_factual_control.json").read_text())
-    fact_sub = sorted(fact_full, key=lambda x: x["id"])[:100]
-    cells.append(code(
-        "# v2_factual_control.json (100-item id-sorted subset, matched factual baseline)\n"
-        f"open('stimuli/v2_factual_control.json','w').write({json.dumps(fact_sub)!r})\n"
+        "import os, json, urllib.request\n"
+        "\n"
+        "STIM_REPO = 'elliott-leow/cog-distortion-validation-demo'\n"
+        "STIM_REF  = 'main'   # branch, tag, or commit SHA\n"
+        "STIM_FILES = ['cognitive_distortions.json', 'v2_factual_control.json']\n"
+        "\n"
+        "for d in ('stimuli', 'results', 'figures', 'review'):\n"
+        "    os.makedirs(d, exist_ok=True)\n"
+        "\n"
+        "for fname in STIM_FILES:\n"
+        "    dst = f'stimuli/{fname}'\n"
+        "    if os.path.exists(dst) and os.path.getsize(dst) > 0:\n"
+        "        print(f'  {fname}: cached')\n"
+        "        continue\n"
+        "    url = f'https://raw.githubusercontent.com/{STIM_REPO}/{STIM_REF}/stimuli/{fname}'\n"
+        "    print(f'  fetching {url}')\n"
+        "    urllib.request.urlretrieve(url, dst)\n"
+        "    print(f'    -> {dst} ({os.path.getsize(dst)/1024:.1f} KB)')\n"
+        "\n"
+        "# v2_factual_control: take the 100-item id-sorted subset (matches the\n"
+        "# embedded build used by the other 7B notebooks).\n"
+        "fact_full = json.load(open('stimuli/v2_factual_control.json'))\n"
+        "fact_sub = sorted(fact_full, key=lambda x: x['id'])[:100]\n"
+        "json.dump(fact_sub, open('stimuli/v2_factual_control.json', 'w'))\n"
+        "print(f'  v2_factual_control: kept {len(fact_sub)} of {len(fact_full)} items')\n"
+        "\n"
         "print('stimuli:', sorted(os.listdir('stimuli')))\n"
     ))
 
